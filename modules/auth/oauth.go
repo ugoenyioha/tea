@@ -30,8 +30,9 @@ const (
 	// default client ID included in most Gitea instances
 	defaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
 
-	// default scopes to request
-	defaultScopes = "admin,user,issue,misc,notification,organization,package,repository"
+	// default scopes to request (using granular scopes for Gitea 1.19+)
+	// See: https://docs.gitea.com/development/api-usage#scopes
+	defaultScopes = "write:activitypub,write:admin,write:issue,write:misc,write:notification,write:organization,write:package,write:repository,write:user"
 
 	// length of code verifier
 	codeVerifierLength = 64
