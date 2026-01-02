@@ -1,0 +1,75 @@
+name: Sync from Upstream
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITEA_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "Gitea Actions"
+          git config user.email "actions@gitea.usableapps.local"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://gitea.com/gitea/tea.git || true
+          git fetch upstream
+
+      - name: Check for upstream changes
+        id: check
+        run: |
+          # Get the latest upstream commit
+          UPSTREAM_COMMIT=$(git rev-parse upstream/main)
+          
+          # Check if we have this commit
+          if git merge-base --is-ancestor $UPSTREAM_COMMIT HEAD; then
+            echo "Already up to date with upstream"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream has new commits"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create sync branch
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          BRANCH_NAME="sync/upstream-$(date +%Y%m%d)"
+          git checkout -b $BRANCH_NAME
+          
+          # Merge upstream, keeping our changes on conflicts
+          git merge upstream/main -m "chore: sync with upstream $(date +%Y-%m-%d)" || {
+            # If there are conflicts, try to auto-resolve keeping our version for oauth.go
+            git checkout --ours modules/auth/oauth.go
+            git add modules/auth/oauth.go
+            git commit -m "chore: sync with upstream $(date +%Y-%m-%d) - kept local oauth.go fix"
+          }
+          
+          git push origin $BRANCH_NAME
+
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          BRANCH_NAME="sync/upstream-$(date +%Y%m%d)"
+          
+          # Create PR using Gitea API
+          curl -X POST "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/pulls" \
+            -H "Authorization: token ${{ secrets.GITEA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"title\": \"chore: sync with upstream $(date +%Y-%m-%d)\",
+              \"body\": \"Automated sync from upstream gitea/tea.\n\nPlease review and ensure the OAuth scope fix in modules/auth/oauth.go is preserved.\",
+              \"head\": \"$BRANCH_NAME\",
+              \"base\": \"main\"
+            }"
