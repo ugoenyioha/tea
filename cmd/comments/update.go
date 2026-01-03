@@ -1,7 +1,7 @@
-// Copyright 2020 The Gitea Authors. All rights reserved.
+// Copyright 2024 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package cmd
+package comments
 
 import (
 	stdctx "context"
@@ -10,67 +10,63 @@ import (
 	"io"
 	"strings"
 
-	"code.gitea.io/tea/cmd/comments"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/theme"
-	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/charmbracelet/huh"
 	"github.com/urfave/cli/v3"
 )
 
-// CmdComment is the main command to operate with comments
-var CmdComment = cli.Command{
-	Name:        "comment",
-	Aliases:     []string{"c"},
-	Category:    catEntities,
-	Usage:       "Manage issue/PR comments",
-	Description: "Add, list, update, or delete comments on issues and pull requests",
-	ArgsUsage:   "<issue / pr index> [<comment body>]",
-	Action:      runAddComment,
+// CmdCommentsUpdate updates a comment
+var CmdCommentsUpdate = cli.Command{
+	Name:        "update",
+	Aliases:     []string{"edit", "e"},
+	Usage:       "Update a comment",
+	Description: "Update an existing comment by ID",
+	ArgsUsage:   "<comment id> [<new body>]",
+	Action:      runCommentsUpdate,
 	Flags:       flags.AllDefaultFlags,
-	Commands: []*cli.Command{
-		&comments.CmdCommentsList,
-		&comments.CmdCommentsUpdate,
-		&comments.CmdCommentsDelete,
-	},
 }
 
-// For backwards compatibility, keep the old CmdAddComment as an alias
-var CmdAddComment = CmdComment
-
-func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
+func runCommentsUpdate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 	args := ctx.Args()
 	if args.Len() == 0 {
-		return fmt.Errorf("Please specify issue / pr index")
+		return fmt.Errorf("must specify comment ID")
 	}
 
-	idx, err := utils.ArgToIndex(ctx.Args().First())
+	commentID, err := parseCommentID(args.First())
 	if err != nil {
 		return err
 	}
 
-	body := strings.Join(ctx.Args().Tail(), " ")
+	body := strings.Join(args.Tail(), " ")
 	if interact.IsStdinPiped() {
-		// custom solution until https://github.com/AlecAivazis/survey/issues/328 is fixed
 		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
 			return err
 		} else if len(bodyStdin) != 0 {
 			body = strings.Join([]string{body, string(bodyStdin)}, "\n\n")
 		}
 	} else if len(body) == 0 {
+		// Get existing comment body for editing
+		client := ctx.Login.Client()
+		existingComment, _, err := client.GetIssueComment(ctx.Owner, ctx.Repo, commentID)
+		if err != nil {
+			return fmt.Errorf("failed to get existing comment: %w", err)
+		}
+		body = existingComment.Body
+
 		if err := huh.NewForm(
 			huh.NewGroup(
 				huh.NewText().
-					Title("Comment(markdown):").
+					Title("Edit comment (markdown):").
 					ExternalEditor(config.GetPreferences().Editor).
 					EditorExtension("md").
 					Value(&body),
@@ -86,7 +82,7 @@ func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	comment, _, err := client.CreateIssueComment(ctx.Owner, ctx.Repo, idx, gitea.CreateIssueCommentOption{
+	comment, _, err := client.EditIssueComment(ctx.Owner, ctx.Repo, commentID, gitea.EditIssueCommentOption{
 		Body: body,
 	})
 	if err != nil {
@@ -94,6 +90,14 @@ func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	print.Comment(comment)
-
 	return nil
+}
+
+func parseCommentID(s string) (int64, error) {
+	var id int64
+	_, err := fmt.Sscanf(s, "%d", &id)
+	if err != nil {
+		return 0, fmt.Errorf("invalid comment ID: %s", s)
+	}
+	return id, nil
 }
