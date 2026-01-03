@@ -7,6 +7,7 @@ import (
 	stdctx "context"
 
 	"code.gitea.io/tea/cmd/actions"
+	"code.gitea.io/tea/cmd/actions/runs"
 
 	"github.com/urfave/cli/v3"
 )
@@ -22,6 +23,7 @@ var CmdActions = cli.Command{
 	Commands: []*cli.Command{
 		&actions.CmdActionsSecrets,
 		&actions.CmdActionsVariables,
+		&runs.CmdActionsRuns,
 	},
 	Flags: []cli.Flag{
 		&cli.StringFlag{
